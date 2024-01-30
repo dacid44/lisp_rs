@@ -18,10 +18,7 @@ pub enum LispError {
     #[error("name error: `{0}` is not defined")]
     NameError(String),
     #[error("argument error: function expected {expected} arguments but was given {actual}")]
-    ArgumentError {
-        expected: String,
-        actual: usize,
-    },
+    ArgumentError { expected: String, actual: usize },
 }
 
 impl Expression {
@@ -31,6 +28,7 @@ impl Expression {
             actual_type: match &self {
                 Expression::Nil => "nil",
                 Expression::Operator(_) => "operator",
+                Expression::Boolean(_) => "boolean",
                 Expression::Integer(_) => "integer",
                 Expression::Name(_) => "name",
                 Expression::List(_) => "list",
@@ -39,5 +37,19 @@ impl Expression {
             },
             value: self,
         }
+    }
+}
+
+pub trait Args {
+    fn take<const N: usize>(self) -> LispResult<[Expression; N]>;
+}
+
+impl Args for Vec<Expression> {
+    fn take<const N: usize>(self) -> LispResult<[Expression; N]> {
+        self.try_into()
+            .map_err(|v: Vec<_>| LispError::ArgumentError {
+                expected: N.to_string(),
+                actual: v.len(),
+            })
     }
 }

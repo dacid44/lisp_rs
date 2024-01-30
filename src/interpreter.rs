@@ -6,12 +6,13 @@ use std::{
 };
 
 use enum_map::{enum_map, EnumMap};
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use literally::hmap;
 use nom::{error::VerboseError, Finish};
 
 use crate::{
-    error::{LispError, LispResult},
+    error::{Args, LispError, LispResult},
     parser::expression,
     syntax::{Expression, Operator},
 };
@@ -37,39 +38,33 @@ lazy_static! {
         "*" => reduce_op!(1, i32::wrapping_mul) as BaseFunction,
         "-" => reduce_op!(0, i32::wrapping_sub) as BaseFunction,
         "/" => reduce_op!(1, i32::wrapping_div) as BaseFunction,
+        "not" => (|args, _| Ok(Expression::Boolean(!args.take::<1>()?[0].truthy()))) as BaseFunction,
     };
     pub static ref OPERATORS: EnumMap<Operator, BaseFunction> = enum_map! {
         Operator::Def => op_def as BaseFunction,
         Operator::Fn => op_fn as BaseFunction,
         Operator::Defn => op_defn as BaseFunction,
+        Operator::Let => op_let as BaseFunction,
+        Operator::Quote => op_quote as BaseFunction,
+        Operator::Eval => op_eval as BaseFunction,
+        Operator::If => op_if as BaseFunction,
     };
 }
 
-fn op_def(mut args: Vec<Expression>, context: ContextRef) -> ExprResult {
-    // TODO: Refactor this to not need the .expect()s
-    if args.len() != 2 {
-        return Err(LispError::ArgumentError {
-            expected: "2".to_string(),
-            actual: args.len(),
-        });
-    }
-    let expr = args.pop().expect("we already checked for len == 2");
-    let name = args
-        .pop()
-        .expect("we already checked for len == 2")
-        .to_name()?;
-    context.set(name, expr.collapse(context.clone())?);
+fn op_def(args: Vec<Expression>, context: ContextRef) -> ExprResult {
+    let [name, expr] = args.take()?;
+    context.set_global(name.to_name()?, expr.collapse(context.clone())?);
     Ok(Expression::Nil)
 }
 
-// TODO: Closures with a captured scope
-struct LispFunction {
-    arg_names: Vec<String>,
-    exprs: Vec<Expression>,
-}
-
 fn op_fn(mut args: Vec<Expression>, _context: ContextRef) -> ExprResult {
-    // TODO: Closures with a captured scope
+    // TODO: Closures with a captured (and maybe frozen?) scope
+    if args.len() < 1 {
+        return Err(LispError::ArgumentError {
+            expected: ">= 1".to_string(),
+            actual: args.len(),
+        });
+    }
     let arg_names = args
         .remove(0)
         .to_vector()?
@@ -99,10 +94,62 @@ fn op_fn(mut args: Vec<Expression>, _context: ContextRef) -> ExprResult {
 }
 
 fn op_defn(mut args: Vec<Expression>, context: ContextRef) -> ExprResult {
+    if args.len() < 2 {
+        return Err(LispError::ArgumentError {
+            expected: ">= 2".to_string(),
+            actual: args.len(),
+        });
+    }
     let name = args.remove(0).to_name()?;
     let f = op_fn(args, context.clone())?;
-    context.set(name, f);
+    context.set_global(name, f);
     Ok(Expression::Nil)
+}
+
+fn op_let(mut args: Vec<Expression>, context: ContextRef) -> ExprResult {
+    // TODO: Proper destructuring
+    if args.len() < 1 {
+        return Err(LispError::ArgumentError {
+            expected: ">= 1".to_string(),
+            actual: args.len(),
+        });
+    }
+
+    let names = args.remove(0).to_vector()?;
+    let context = context.scope();
+    for (name, expr) in names
+        .into_iter()
+        .tuples()
+        .map(|(name, expr)| name.to_name().map(|name| (name, expr)))
+        .collect::<Result<Vec<_>, _>>()?
+    {
+        context.set(name, expr.collapse(context.clone())?);
+    }
+
+    let mut return_value = Expression::Nil;
+    for expr in args {
+        return_value = expr.collapse(context.clone())?;
+    }
+    Ok(return_value)
+}
+
+fn op_if(args: Vec<Expression>, context: ContextRef) -> ExprResult {
+    let [condition, if_true, if_false] = args.take()?;
+    if condition.collapse(context.clone())?.truthy() {
+        if_true.collapse(context)
+    } else {
+        if_false.collapse(context)
+    }
+}
+
+fn op_quote(args: Vec<Expression>, _context: ContextRef) -> ExprResult {
+    let [expr] = args.take()?;
+    Ok(expr)
+}
+
+fn op_eval(args: Vec<Expression>, context: ContextRef) -> ExprResult {
+    let [expr] = args.take()?;
+    Ok(expr.collapse(context.clone())?.collapse(context)?)
 }
 
 type ContextRef = Rc<Context>;
@@ -110,6 +157,7 @@ type ContextRef = Rc<Context>;
 pub struct Context {
     names: RefCell<HashMap<String, Expression>>,
     parent: Option<ContextRef>,
+    global: Option<ContextRef>,
 }
 
 impl Context {
@@ -117,6 +165,7 @@ impl Context {
         Rc::new(Self {
             names: RefCell::new(HashMap::new()),
             parent: None,
+            global: None,
         })
     }
 
@@ -125,7 +174,7 @@ impl Context {
             .borrow()
             .get(name)
             .cloned()
-            .or_else(|| match self.parent.clone() {
+            .or_else(|| match self.parent.as_ref() {
                 Some(parent) => parent.get(name).ok(),
                 None => FUNCTIONS
                     .get(name)
@@ -138,10 +187,20 @@ impl Context {
         self.names.borrow_mut().insert(name, value);
     }
 
+    fn set_global(&self, name: String, value: Expression) {
+        match self.global.as_ref() {
+            Some(global) => global,
+            None => self,
+        }
+        .set(name, value)
+    }
+
     fn scope(self: ContextRef) -> ContextRef {
         Rc::new(Self {
             names: RefCell::new(HashMap::new()),
             parent: Some(self.clone()),
+            // Clone global if it's there, otherwise, this is global, so clone self
+            global: self.global.as_ref().or_else(|| Some(&self)).cloned(),
         })
     }
 }
@@ -158,6 +217,13 @@ impl Expression {
         match self {
             Self::Operator(op) => Ok(op),
             e => Err(e.type_error("operator")),
+        }
+    }
+
+    pub fn to_boolean(self) -> LispResult<bool> {
+        match self {
+            Self::Boolean(b) => Ok(b),
+            e => Err(e.type_error("boolean")),
         }
     }
 
@@ -194,6 +260,10 @@ impl Expression {
             Self::Function(f) => Ok(f),
             e => Err(e.type_error("function")),
         }
+    }
+
+    pub fn truthy(&self) -> bool {
+        !matches!(self, Expression::Nil | Expression::Boolean(false))
     }
 
     fn collapse(self, context: ContextRef) -> ExprResult {

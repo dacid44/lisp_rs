@@ -25,11 +25,19 @@ fn operator<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Oper
         value(Operator::Defn, tag("defn")),
         value(Operator::Def, tag("def")),
         value(Operator::Fn, tag("fn")),
+        value(Operator::Let, tag("let")),
+        value(Operator::If, tag("if")),
+        value(Operator::Quote, tag("quote")),
+        value(Operator::Eval, tag("eval")),
     ))(input)
 }
 
+fn boolean<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, bool, E> {
+    alt((value(true, tag("true")), value(false, tag("false"))))(input)
+}
+
 fn name_char(c: char) -> bool {
-    !c.is_whitespace() && c != ',' && c != '(' && c != ')' && c != '[' && c != ']'
+    !c.is_whitespace() && ",()[]'".chars().all(|cc| cc != c)
 }
 
 fn integer<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
@@ -46,23 +54,36 @@ fn name<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, String, 
     take_while1(name_char).map(ToString::to_string).parse(input)
 }
 
-fn list<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(start: char, end: char) -> impl Parser<&'a str, Vec<Expression>, E> {
+fn list<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
+    start: &'static str,
+    end: &'static str,
+) -> impl Parser<&'a str, Vec<Expression>, E> {
     let separator = || recognize(tuple((multispace0, char(','), multispace0))).or(multispace1);
 
-    delimited(char(start).and(multispace0), separated_list0(separator(), expression), opt(separator()).and(char(end)))
+    delimited(
+        tag(start).and(multispace0),
+        separated_list0(separator(), expression),
+        opt(separator()).and(tag(end)),
+    )
 }
 
 pub fn expression<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
     input: &'a str,
 ) -> IResult<&'a str, Expression, E> {
-
     alt((
         value(Expression::Nil, tag("nil")),
         operator.map(Expression::Operator),
+        boolean.map(Expression::Boolean),
         integer.map(Expression::Integer),
         name.map(Expression::Name),
-        list('(', ')').map(|list| Expression::List(list.into_iter().collect())),
-        list('[', ']').map(Expression::Vector),
+        list("(", ")").map(|list| Expression::List(list.into_iter().collect())),
+        list("'(", ")").map(|l| {
+            Expression::List(list![
+                Expression::Operator(Operator::Quote),
+                Expression::List(l.into_iter().collect())
+            ])
+        }),
+        list("[", "]").map(Expression::Vector),
     ))(input)
 }
 

@@ -10,6 +10,10 @@ pub enum Operator {
     Def,
     Fn,
     Defn,
+    Let,
+    If,
+    Quote,
+    Eval,
 }
 
 #[derive(Derivative, Clone)]
@@ -17,6 +21,7 @@ pub enum Operator {
 pub enum Expression {
     Nil,
     Operator(Operator),
+    Boolean(bool),
     Integer(i32),
     Name(String),
     List(LinkedList<Expression>),
@@ -35,10 +40,15 @@ impl Display for Expression {
                     Operator::Def => "def",
                     Operator::Fn => "fn",
                     Operator::Defn => "defn",
+                    Operator::Let => "defn",
+                    Operator::If => "if",
+                    Operator::Quote => "quote",
+                    Operator::Eval => "eval",
                 })
             ),
-            Self::Integer(x) => write!(f, "{}", x),
-            Self::Name(name) => write!(f, "<{}>", name),
+            Self::Boolean(b) => write!(f, "{b}"),
+            Self::Integer(x) => write!(f, "{x}"),
+            Self::Name(name) => write!(f, "<{name}>"),
             Self::List(list) => write!(
                 f,
                 "({})",
