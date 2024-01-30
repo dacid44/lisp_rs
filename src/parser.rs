@@ -3,10 +3,7 @@ use std::num::ParseIntError;
 use literally::list;
 use nom::{
     branch::alt,
-    bytes::{
-        complete::{is_a, take_while1},
-        streaming::tag,
-    },
+    bytes::complete::{is_a, tag, take_while1},
     character::{
         complete::digit1,
         streaming::{char, multispace0, multispace1},
