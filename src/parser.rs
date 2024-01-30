@@ -1,5 +1,6 @@
 use std::num::ParseIntError;
 
+use literally::list;
 use nom::{
     branch::alt,
     bytes::{
@@ -21,13 +22,14 @@ use crate::syntax::{Expression, Operator};
 
 fn operator<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Operator, E> {
     alt((
-        value(Operator::Lambda, char('\\')),
+        value(Operator::Defn, tag("defn")),
         value(Operator::Def, tag("def")),
+        value(Operator::Fn, tag("fn")),
     ))(input)
 }
 
 fn name_char(c: char) -> bool {
-    !c.is_whitespace() && c != ',' && c != '(' && c != ')'
+    !c.is_whitespace() && c != ',' && c != '(' && c != ')' && c != '[' && c != ']'
 }
 
 fn integer<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
@@ -44,20 +46,23 @@ fn name<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, String, 
     take_while1(name_char).map(ToString::to_string).parse(input)
 }
 
+fn list<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(start: char, end: char) -> impl Parser<&'a str, Vec<Expression>, E> {
+    let separator = || recognize(tuple((multispace0, char(','), multispace0))).or(multispace1);
+
+    delimited(char(start).and(multispace0), separated_list0(separator(), expression), opt(separator()).and(char(end)))
+}
+
 pub fn expression<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
     input: &'a str,
 ) -> IResult<&'a str, Expression, E> {
-    let separator = || recognize(tuple((multispace0, char(','), multispace0))).or(multispace1);
 
     alt((
+        value(Expression::Nil, tag("nil")),
         operator.map(Expression::Operator),
         integer.map(Expression::Integer),
         name.map(Expression::Name),
-        delimited(
-            char('(').and(multispace0),
-            separated_list0(separator(), expression).map(Expression::List),
-            opt(separator()).and(char(')')),
-        ),
+        list('(', ')').map(|list| Expression::List(list.into_iter().collect())),
+        list('[', ']').map(Expression::Vector),
     ))(input)
 }
 
@@ -89,7 +94,7 @@ fn test_lists() {
         expression::<()>("(1 2,3 ,4, 5)"),
         Ok((
             "",
-            E::List(vec![
+            E::List(list![
                 E::Integer(1),
                 E::Integer(2),
                 E::Integer(3),
@@ -102,9 +107,9 @@ fn test_lists() {
         expression::<()>("(((((42), ) ,),) )"),
         Ok((
             "",
-            E::List(vec![E::List(vec![E::List(vec![E::List(vec![E::List(
-                vec![E::Integer(42)]
-            )])])])])
+            E::List(list![E::List(list![E::List(list![E::List(list![
+                E::List(list![E::Integer(42)])
+            ])])])])
         )),
     );
 }

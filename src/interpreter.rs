@@ -1,21 +1,22 @@
 use std::{
     borrow::{Borrow, BorrowMut},
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, LinkedList},
     rc::Rc,
 };
 
+use enum_map::{enum_map, EnumMap};
 use lazy_static::lazy_static;
 use literally::hmap;
 use nom::{error::VerboseError, Finish};
 
 use crate::{
-    error::{self, LispError, LispResult},
+    error::{LispError, LispResult},
     parser::expression,
     syntax::{Expression, Operator},
 };
 
-pub type ExprResult = Result<Expression, LispError>;
+pub type ExprResult = LispResult<Expression>;
 pub type Function = dyn Fn(Vec<Expression>, ContextRef) -> ExprResult;
 pub type BaseFunction = fn(Vec<Expression>, ContextRef) -> ExprResult;
 
@@ -37,6 +38,71 @@ lazy_static! {
         "-" => reduce_op!(0, i32::wrapping_sub) as BaseFunction,
         "/" => reduce_op!(1, i32::wrapping_div) as BaseFunction,
     };
+    pub static ref OPERATORS: EnumMap<Operator, BaseFunction> = enum_map! {
+        Operator::Def => op_def as BaseFunction,
+        Operator::Fn => op_fn as BaseFunction,
+        Operator::Defn => op_defn as BaseFunction,
+    };
+}
+
+fn op_def(mut args: Vec<Expression>, context: ContextRef) -> ExprResult {
+    // TODO: Refactor this to not need the .expect()s
+    if args.len() != 2 {
+        return Err(LispError::ArgumentError {
+            expected: "2".to_string(),
+            actual: args.len(),
+        });
+    }
+    let expr = args.pop().expect("we already checked for len == 2");
+    let name = args
+        .pop()
+        .expect("we already checked for len == 2")
+        .to_name()?;
+    context.set(name, expr.collapse(context.clone())?);
+    Ok(Expression::Nil)
+}
+
+// TODO: Closures with a captured scope
+struct LispFunction {
+    arg_names: Vec<String>,
+    exprs: Vec<Expression>,
+}
+
+fn op_fn(mut args: Vec<Expression>, _context: ContextRef) -> ExprResult {
+    // TODO: Closures with a captured scope
+    let arg_names = args
+        .remove(0)
+        .to_vector()?
+        .into_iter()
+        .map(Expression::to_name)
+        .collect::<Result<Vec<_>, _>>()?;
+    let exprs = args;
+
+    Ok(Expression::Function(Rc::new(move |args, context| {
+        let context = context.scope();
+        if arg_names.len() != args.len() {
+            return Err(LispError::ArgumentError {
+                expected: format!("{}", arg_names.len()),
+                actual: args.len(),
+            });
+        }
+        for (name, arg) in arg_names.iter().zip(args.into_iter()) {
+            context.set(name.clone(), arg);
+        }
+
+        let mut return_value = Expression::Nil;
+        for expr in &exprs {
+            return_value = expr.clone().collapse(context.clone())?;
+        }
+        Ok(return_value)
+    })))
+}
+
+fn op_defn(mut args: Vec<Expression>, context: ContextRef) -> ExprResult {
+    let name = args.remove(0).to_name()?;
+    let f = op_fn(args, context.clone())?;
+    context.set(name, f);
+    Ok(Expression::Nil)
 }
 
 type ContextRef = Rc<Context>;
@@ -47,8 +113,6 @@ pub struct Context {
 }
 
 impl Context {
-    const RESERVED_NAMES: &'static [&'static str] = &["def", "\\"];
-
     pub fn new() -> ContextRef {
         Rc::new(Self {
             names: RefCell::new(HashMap::new()),
@@ -83,6 +147,13 @@ impl Context {
 }
 
 impl Expression {
+    pub fn to_nil(self) -> LispResult<()> {
+        match self {
+            Self::Nil => Ok(()),
+            e => Err(e.type_error("nil")),
+        }
+    }
+
     pub fn to_operator(self) -> LispResult<Operator> {
         match self {
             Self::Operator(op) => Ok(op),
@@ -104,10 +175,17 @@ impl Expression {
         }
     }
 
-    pub fn to_list(self) -> LispResult<Vec<Expression>> {
+    pub fn to_list(self) -> LispResult<LinkedList<Expression>> {
         match self {
             Self::List(l) => Ok(l),
             e => Err(e.type_error("list")),
+        }
+    }
+
+    pub fn to_vector(self) -> LispResult<Vec<Expression>> {
+        match self {
+            Self::Vector(v) => Ok(v),
+            e => Err(e.type_error("vector")),
         }
     }
 
@@ -121,15 +199,20 @@ impl Expression {
     fn collapse(self, context: ContextRef) -> ExprResult {
         match self {
             Self::Name(name) => context.get(&name),
-            Self::List(list) if list.is_empty() => Ok(Self::List(list)),
             Self::List(mut list) => {
-                let f = list.remove(0).collapse(context.clone())?.to_function()?;
-                f(
-                    list.into_iter()
-                        .map(|expr| expr.collapse(context.clone()))
-                        .collect::<Result<_, _>>()?,
-                    context,
-                )
+                let Some(first) = list.pop_front() else {
+                    return Ok(Self::List(list));
+                };
+                match first.collapse(context.clone())? {
+                    Expression::Operator(op) => OPERATORS[op](list.into_iter().collect(), context),
+                    Expression::Function(f) => f(
+                        list.into_iter()
+                            .map(|expr| expr.collapse(context.clone()))
+                            .collect::<Result<_, _>>()?,
+                        context,
+                    ),
+                    e => Err(e.type_error("operator or function")),
+                }
             }
             e => Ok(e),
         }

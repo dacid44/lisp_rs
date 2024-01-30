@@ -2,7 +2,6 @@ use inquire::Text;
 use interpreter::{execute, Context};
 
 mod error;
-mod functions;
 mod interpreter;
 mod parser;
 mod syntax;

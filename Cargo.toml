@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.79"
 derivative = "2.2.0"
+enum-map = "2.7.3"
 inquire = "0.6.2"
 lazy_static = "1.4.0"
 literally = "0.1.3"

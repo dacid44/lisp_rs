@@ -16,7 +16,12 @@ pub enum LispError {
         value: Expression,
     },
     #[error("name error: `{0}` is not defined")]
-    NameError(String)
+    NameError(String),
+    #[error("argument error: function expected {expected} arguments but was given {actual}")]
+    ArgumentError {
+        expected: String,
+        actual: usize,
+    },
 }
 
 impl Expression {
@@ -24,10 +29,12 @@ impl Expression {
         LispError::TypeError {
             expected_type,
             actual_type: match &self {
+                Expression::Nil => "nil",
                 Expression::Operator(_) => "operator",
                 Expression::Integer(_) => "integer",
                 Expression::Name(_) => "name",
                 Expression::List(_) => "list",
+                Expression::Vector(_) => "vector",
                 Expression::Function(_) => "function",
             },
             value: self,
