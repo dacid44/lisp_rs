@@ -1,14 +1,15 @@
-use nom::error::VerboseError;
 use thiserror::Error;
 
-use crate::syntax::Expression;
+use crate::{parser::Token, syntax::Expression};
 
 pub type LispResult<T> = Result<T, LispError>;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum LispError {
-    #[error("parse error: {0}")]
-    ParseError(#[from] nom::error::Error<String>),
+    #[error("token parse error:\n{0}")]
+    TokenError(String),
+    #[error("syntax parse error: {0}")]
+    SyntaxError(String),
     #[error("type error: expected {expected_type}, got {value} of type {actual_type}")]
     TypeError {
         expected_type: &'static str,

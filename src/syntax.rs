@@ -1,7 +1,7 @@
 use std::{collections::LinkedList, fmt::Display, rc::Rc};
 
 use derivative::Derivative;
-use enum_map::Enum;
+use enum_map::{Enum, EnumArray, EnumMap};
 
 use crate::interpreter::Function;
 
@@ -14,6 +14,11 @@ pub enum Operator {
     If,
     Quote,
     Eval,
+}
+
+impl Operator {
+    pub const TEXT: EnumMap<Self, &'static str> =
+        EnumMap::from_array(["def", "fn", "defn", "let", "if", "quote", "eval"]);
 }
 
 #[derive(Derivative, Clone)]
@@ -33,19 +38,7 @@ impl Display for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Nil => write!(f, "nil"),
-            Self::Operator(op) => write!(
-                f,
-                "<operator {}>",
-                (match op {
-                    Operator::Def => "def",
-                    Operator::Fn => "fn",
-                    Operator::Defn => "defn",
-                    Operator::Let => "defn",
-                    Operator::If => "if",
-                    Operator::Quote => "quote",
-                    Operator::Eval => "eval",
-                })
-            ),
+            Self::Operator(op) => write!(f, "<operator {}>", Operator::TEXT[*op]),
             Self::Boolean(b) => write!(f, "{b}"),
             Self::Integer(x) => write!(f, "{x}"),
             Self::Name(name) => write!(f, "<{name}>"),

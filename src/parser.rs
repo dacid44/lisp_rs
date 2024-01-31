@@ -1,133 +1,253 @@
-use std::num::ParseIntError;
+use std::error::Error;
 
-use literally::list;
-use nom::{
-    branch::alt,
-    bytes::complete::{is_a, tag, take_while1},
-    character::{
-        complete::digit1,
-        streaming::{char, multispace0, multispace1},
-    },
-    combinator::{all_consuming, map_res, opt, recognize, value},
-    error::{FromExternalError, ParseError},
-    multi::separated_list0,
-    sequence::{delimited, tuple},
-    IResult, Parser,
+use winnow::stream::ContainsToken;
+
+use crate::{
+    error::{LispError, LispResult},
+    syntax::{Expression, Operator},
 };
 
-use crate::syntax::{Expression, Operator};
+use self::{expr::parse_expression, tokens::tokenize};
 
-fn operator<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Operator, E> {
-    alt((
-        value(Operator::Defn, tag("defn")),
-        value(Operator::Def, tag("def")),
-        value(Operator::Fn, tag("fn")),
-        value(Operator::Let, tag("let")),
-        value(Operator::If, tag("if")),
-        value(Operator::Quote, tag("quote")),
-        value(Operator::Eval, tag("eval")),
-    ))(input)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Token {
+    LeftParen,
+    RightParen,
+    LeftBracket,
+    RightBracket,
+    Quote,
+    Operator(Operator),
+    Boolean(bool),
+    Integer(i32),
+    Name(String),
 }
 
-fn boolean<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, bool, E> {
-    alt((value(true, tag("true")), value(false, tag("false"))))(input)
+impl ContainsToken<Self> for Token {
+    fn contains_token(&self, token: Self) -> bool {
+        *self == token
+    }
 }
 
-fn name_char(c: char) -> bool {
-    !c.is_whitespace() && ",()[]'".chars().all(|cc| cc != c)
+pub mod tokens {
+    use winnow::{
+        ascii::digit1,
+        combinator::{alt, eof, peek, repeat, terminated, not},
+        error::{ContextError, ParseError, ParserError},
+        token::{none_of, one_of, take_while},
+        Located, PResult, Parser,
+    };
+
+    use crate::syntax::Operator;
+    use std::ops::Range;
+
+    use super::Token;
+
+    fn is_name_char(c: char) -> bool {
+        c.is_ascii_alphanumeric() || "*+!-_'?<>=/".contains(c)
+    }
+
+    fn is_whitespace(c: char) -> bool {
+        c.is_ascii_whitespace() || c == ','
+    }
+
+    fn punctuation<'a, E: ParserError<Located<&'a str>>>(
+        input: &mut Located<&'a str>,
+    ) -> PResult<(Token, Range<usize>), E> {
+        use Token as T;
+        alt([
+            '('.value(T::LeftParen),
+            ')'.value(T::RightParen),
+            '['.value(T::LeftBracket),
+            ']'.value(T::RightBracket),
+            '\''.value(T::Quote),
+        ])
+        .with_span()
+        .parse_next(input)
+    }
+
+    fn operator<'a, E: ParserError<Located<&'a str>>>(
+        input: &mut Located<&'a str>,
+    ) -> PResult<(Token, Range<usize>), E> {
+        use Operator as O;
+        alt([
+            "defn".value(O::Defn),
+            "def".value(O::Def),
+            "fn".value(O::Fn),
+            "let".value(O::Let),
+            "if".value(O::If),
+            "quote".value(O::Quote),
+            "eval".value(O::Eval),
+        ])
+        .map(Token::Operator)
+        .with_span()
+        .parse_next(input)
+    }
+
+    fn boolean<'a, E: ParserError<Located<&'a str>>>(
+        input: &mut Located<&'a str>,
+    ) -> PResult<(Token, Range<usize>), E> {
+        alt(["true".value(true), "false".value(false)])
+            .map(Token::Boolean)
+            .with_span()
+            .parse_next(input)
+    }
+
+    fn integer<'a, E: ParserError<Located<&'a str>>>(
+        input: &mut Located<&'a str>,
+    ) -> PResult<(Token, Range<usize>), E> {
+        terminated(digit1, peek(not(one_of(is_name_char))))
+            .parse_to()
+            .map(Token::Integer)
+            .with_span()
+            .parse_next(input)
+    }
+
+    fn name<'a, E: ParserError<Located<&'a str>>>(
+        input: &mut Located<&'a str>,
+    ) -> PResult<(Token, Range<usize>), E> {
+        take_while(1.., is_name_char)
+            .map(|s: &str| Token::Name(s.to_string()))
+            .with_span()
+            .parse_next(input)
+    }
+
+    fn token<'a, E: ParserError<Located<&'a str>>>(
+        input: &mut Located<&'a str>,
+    ) -> PResult<(Token, Range<usize>), E> {
+        alt([punctuation, operator, boolean, integer, name]).parse_next(input)
+    }
+
+    fn tokens<'a, E: ParserError<Located<&'a str>>>(
+        input: &mut Located<&'a str>,
+    ) -> PResult<Vec<(Token, Range<usize>)>, E> {
+        repeat(
+            0..,
+            alt((token.map(Some), take_while(1.., is_whitespace).value(None))),
+        )
+        .map(|v: Vec<_>| v.into_iter().flatten().collect())
+        .parse_next(input)
+    }
+
+    pub fn tokenize(
+        input: &str,
+    ) -> Result<Vec<(Token, Range<usize>)>, ParseError<Located<&str>, ContextError>> {
+        // TODO: Replace this error type with a LispError
+        tokens.parse(Located::new(input))
+    }
 }
 
-fn integer<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
-    input: &'a str,
-) -> IResult<&'a str, i32, E> {
-    map_res(
-        take_while1(name_char).and_then(all_consuming(digit1)),
-        str::parse,
+pub mod expr {
+    use literally::list;
+    use winnow::{
+        combinator::{alt, delimited, preceded, repeat},
+        error::{ContextError, ParseError, ParserError},
+        token::{any, one_of},
+        PResult, Parser,
+    };
+
+    use crate::syntax::{Expression, Operator};
+
+    use super::Token;
+
+    fn single_token_expr<'a, E: ParserError<&'a [Token]>>(
+        input: &mut &'a [Token],
+    ) -> PResult<Expression, E> {
+        any.verify_map(|t| match t {
+            Token::Operator(op) => Some(Expression::Operator(op)),
+            Token::Boolean(b) => Some(Expression::Boolean(b)),
+            Token::Integer(x) => Some(Expression::Integer(x)),
+            Token::Name(s) => Some(Expression::Name(s)),
+            _ => None,
+        })
+        .parse_next(input)
+    }
+
+    fn list<'a, E: ParserError<&'a [Token]>>(
+        start: Token,
+        end: Token,
+    ) -> impl Parser<&'a [Token], Vec<Expression>, E> {
+        delimited(one_of(start), repeat(0.., expression), one_of(end))
+        // repeat(0.., expression)
+    }
+
+    fn expression<'a, E: ParserError<&'a [Token]>>(
+        input: &mut &'a [Token],
+    ) -> PResult<Expression, E> {
+        alt((
+            single_token_expr,
+            list(Token::LeftParen, Token::RightParen)
+                .map(|v| Expression::List(v.into_iter().collect())),
+            preceded(
+                one_of(Token::Quote),
+                list(Token::LeftParen, Token::RightParen),
+            )
+            .map(|v| {
+                Expression::List(list![
+                    Expression::Operator(Operator::Quote),
+                    Expression::List(v.into_iter().collect())
+                ])
+            }),
+            list(Token::LeftBracket, Token::RightBracket).map(Expression::Vector),
+        ))
+        .parse_next(input)
+    }
+
+    pub fn parse_expression(
+        input: &[Token],
+    ) -> Result<Expression, ParseError<&[Token], ContextError>> {
+        expression.parse(input)
+    }
+}
+
+pub fn parse(input: &str) -> LispResult<Expression> {
+    parse_expression(
+        &tokenize(&input)
+            .map_err(|err| LispError::TokenError(err.to_string()))?
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect::<Vec<_>>()[..],
     )
-    .parse(input)
+    .map_err(|err| LispError::SyntaxError(format!("{err:?}")))
 }
 
-fn name<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, String, E> {
-    take_while1(name_char).map(ToString::to_string).parse(input)
-}
+mod tests {
+    use literally::list;
 
-fn list<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
-    start: &'static str,
-    end: &'static str,
-) -> impl Parser<&'a str, Vec<Expression>, E> {
-    let separator = || recognize(tuple((multispace0, char(','), multispace0))).or(multispace1);
+    use crate::{
+        parser::parse,
+        syntax::{Expression, Operator},
+    };
 
-    delimited(
-        tag(start).and(multispace0),
-        separated_list0(separator(), expression),
-        opt(separator()).and(tag(end)),
-    )
-}
+    #[test]
+    fn test_simple_expressions() {
+        assert_eq!(parse("def"), Ok(Expression::Operator(Operator::Def)));
+        assert_eq!(parse("42"), Ok(Expression::Integer(42)));
+    }
 
-pub fn expression<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
-    input: &'a str,
-) -> IResult<&'a str, Expression, E> {
-    alt((
-        value(Expression::Nil, tag("nil")),
-        operator.map(Expression::Operator),
-        boolean.map(Expression::Boolean),
-        integer.map(Expression::Integer),
-        name.map(Expression::Name),
-        list("(", ")").map(|list| Expression::List(list.into_iter().collect())),
-        list("'(", ")").map(|l| {
-            Expression::List(list![
-                Expression::Operator(Operator::Quote),
-                Expression::List(l.into_iter().collect())
-            ])
-        }),
-        list("[", "]").map(Expression::Vector),
-    ))(input)
-}
+    #[test]
+    fn test_names() {
+        assert_eq!(parse("asdf"), Ok(Expression::Name("asdf".to_string())));
+        assert_eq!(parse("3ab asdf"), Ok(Expression::Name("3ab".to_string())));
+    }
 
-#[test]
-fn test_simple_expressions() {
-    assert_eq!(
-        expression::<()>("def"),
-        Ok(("", Expression::Operator(Operator::Def)))
-    );
-    assert_eq!(expression::<()>("42"), Ok(("", Expression::Integer(42))));
-}
-
-#[test]
-fn test_names() {
-    assert_eq!(
-        expression::<()>("asdf"),
-        Ok(("", Expression::Name("asdf".to_string())))
-    );
-    assert_eq!(
-        expression::<()>("3ab asdf"),
-        Ok((" asdf", Expression::Name("3ab".to_string())))
-    );
-}
-
-#[test]
-fn test_lists() {
-    use Expression as E;
-    assert_eq!(
-        expression::<()>("(1 2,3 ,4, 5)"),
-        Ok((
-            "",
-            E::List(list![
+    #[test]
+    fn test_lists() {
+        use Expression as E;
+        assert_eq!(
+            parse("(1 2,3 ,4, 5)"),
+            Ok(E::List(list![
                 E::Integer(1),
                 E::Integer(2),
                 E::Integer(3),
                 E::Integer(4),
                 E::Integer(5)
-            ])
-        ))
-    );
-    assert_eq!(
-        expression::<()>("(((((42), ) ,),) )"),
-        Ok((
-            "",
-            E::List(list![E::List(list![E::List(list![E::List(list![
-                E::List(list![E::Integer(42)])
-            ])])])])
-        )),
-    );
+            ]))
+        );
+        assert_eq!(
+            parse("(((((42), ) ,),) )"),
+            Ok(E::List(list![E::List(list![E::List(list![E::List(
+                list![E::List(list![E::Integer(42)])]
+            )])])])),
+        );
+    }
 }

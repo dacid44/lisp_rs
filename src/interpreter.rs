@@ -9,11 +9,9 @@ use enum_map::{enum_map, EnumMap};
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use literally::hmap;
-use nom::{error::VerboseError, Finish};
 
 use crate::{
     error::{Args, LispError, LispResult},
-    parser::expression,
     syntax::{Expression, Operator},
 };
 
@@ -21,7 +19,7 @@ pub type ExprResult = LispResult<Expression>;
 pub type Function = dyn Fn(Vec<Expression>, ContextRef) -> ExprResult;
 pub type BaseFunction = fn(Vec<Expression>, ContextRef) -> ExprResult;
 
-macro_rules! reduce_op {
+macro_rules! fold_op {
     ( $init:expr, $f:expr ) => {
         |args, _context| {
             args.into_iter()
@@ -34,10 +32,10 @@ macro_rules! reduce_op {
 
 lazy_static! {
     pub static ref FUNCTIONS: HashMap<&'static str, BaseFunction> = hmap! {
-        "+" => reduce_op!(0, i32::wrapping_add) as BaseFunction,
-        "*" => reduce_op!(1, i32::wrapping_mul) as BaseFunction,
-        "-" => reduce_op!(0, i32::wrapping_sub) as BaseFunction,
-        "/" => reduce_op!(1, i32::wrapping_div) as BaseFunction,
+        "+" => fold_op!(0, i32::wrapping_add) as BaseFunction,
+        "*" => fold_op!(1, i32::wrapping_mul) as BaseFunction,
+        "-" => fold_op!(0, i32::wrapping_sub) as BaseFunction,
+        "/" => fold_op!(1, i32::wrapping_div) as BaseFunction,
         "not" => (|args, _| Ok(Expression::Boolean(!args.take::<1>()?[0].truthy()))) as BaseFunction,
     };
     pub static ref OPERATORS: EnumMap<Operator, BaseFunction> = enum_map! {
@@ -266,7 +264,7 @@ impl Expression {
         !matches!(self, Expression::Nil | Expression::Boolean(false))
     }
 
-    fn collapse(self, context: ContextRef) -> ExprResult {
+    pub fn collapse(self, context: ContextRef) -> ExprResult {
         match self {
             Self::Name(name) => context.get(&name),
             Self::List(mut list) => {
@@ -287,12 +285,4 @@ impl Expression {
             e => Ok(e),
         }
     }
-}
-
-pub fn execute(input: &str, context: ContextRef) -> ExprResult {
-    expression::<nom::error::Error<&str>>(input)
-        .map_err(|err| err.to_owned())
-        .finish()?
-        .1
-        .collapse(context)
 }
