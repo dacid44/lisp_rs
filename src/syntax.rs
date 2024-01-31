@@ -1,7 +1,7 @@
 use std::{collections::LinkedList, fmt::Display, rc::Rc};
 
 use derivative::Derivative;
-use enum_map::{Enum, EnumArray, EnumMap};
+use enum_map::{Enum, EnumMap};
 
 use crate::interpreter::Function;
 

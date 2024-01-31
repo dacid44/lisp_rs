@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{parser::Token, syntax::Expression};
+use crate::syntax::Expression;
 
 pub type LispResult<T> = Result<T, LispError>;
 

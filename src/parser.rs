@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use winnow::stream::ContainsToken;
 
 use crate::{
@@ -31,9 +29,9 @@ impl ContainsToken<Self> for Token {
 pub mod tokens {
     use winnow::{
         ascii::digit1,
-        combinator::{alt, eof, peek, repeat, terminated, not},
+        combinator::{alt, not, peek, repeat, terminated},
         error::{ContextError, ParseError, ParserError},
-        token::{none_of, one_of, take_while},
+        token::{one_of, take_while},
         Located, PResult, Parser,
     };
 
@@ -41,6 +39,8 @@ pub mod tokens {
     use std::ops::Range;
 
     use super::Token;
+
+    type TokenSpan = (Token, Range<usize>);
 
     fn is_name_char(c: char) -> bool {
         c.is_ascii_alphanumeric() || "*+!-_'?<>=/".contains(c)
@@ -67,7 +67,7 @@ pub mod tokens {
 
     fn operator<'a, E: ParserError<Located<&'a str>>>(
         input: &mut Located<&'a str>,
-    ) -> PResult<(Token, Range<usize>), E> {
+    ) -> PResult<TokenSpan, E> {
         use Operator as O;
         alt([
             "defn".value(O::Defn),
@@ -85,7 +85,7 @@ pub mod tokens {
 
     fn boolean<'a, E: ParserError<Located<&'a str>>>(
         input: &mut Located<&'a str>,
-    ) -> PResult<(Token, Range<usize>), E> {
+    ) -> PResult<TokenSpan, E> {
         alt(["true".value(true), "false".value(false)])
             .map(Token::Boolean)
             .with_span()
@@ -94,7 +94,7 @@ pub mod tokens {
 
     fn integer<'a, E: ParserError<Located<&'a str>>>(
         input: &mut Located<&'a str>,
-    ) -> PResult<(Token, Range<usize>), E> {
+    ) -> PResult<TokenSpan, E> {
         terminated(digit1, peek(not(one_of(is_name_char))))
             .parse_to()
             .map(Token::Integer)
@@ -104,7 +104,7 @@ pub mod tokens {
 
     fn name<'a, E: ParserError<Located<&'a str>>>(
         input: &mut Located<&'a str>,
-    ) -> PResult<(Token, Range<usize>), E> {
+    ) -> PResult<TokenSpan, E> {
         take_while(1.., is_name_char)
             .map(|s: &str| Token::Name(s.to_string()))
             .with_span()
@@ -113,13 +113,13 @@ pub mod tokens {
 
     fn token<'a, E: ParserError<Located<&'a str>>>(
         input: &mut Located<&'a str>,
-    ) -> PResult<(Token, Range<usize>), E> {
+    ) -> PResult<TokenSpan, E> {
         alt([punctuation, operator, boolean, integer, name]).parse_next(input)
     }
 
     fn tokens<'a, E: ParserError<Located<&'a str>>>(
         input: &mut Located<&'a str>,
-    ) -> PResult<Vec<(Token, Range<usize>)>, E> {
+    ) -> PResult<Vec<TokenSpan>, E> {
         repeat(
             0..,
             alt((token.map(Some), take_while(1.., is_whitespace).value(None))),
@@ -130,7 +130,7 @@ pub mod tokens {
 
     pub fn tokenize(
         input: &str,
-    ) -> Result<Vec<(Token, Range<usize>)>, ParseError<Located<&str>, ContextError>> {
+    ) -> Result<Vec<TokenSpan>, ParseError<Located<&str>, ContextError>> {
         // TODO: Replace this error type with a LispError
         tokens.parse(Located::new(input))
     }
@@ -201,7 +201,7 @@ pub mod expr {
 
 pub fn parse(input: &str) -> LispResult<Expression> {
     parse_expression(
-        &tokenize(&input)
+        &tokenize(input)
             .map_err(|err| LispError::TokenError(err.to_string()))?
             .into_iter()
             .map(|(t, _)| t)
@@ -210,6 +210,7 @@ pub fn parse(input: &str) -> LispResult<Expression> {
     .map_err(|err| LispError::SyntaxError(format!("{err:?}")))
 }
 
+#[cfg(test)]
 mod tests {
     use literally::list;
 

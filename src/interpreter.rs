@@ -1,5 +1,4 @@
 use std::{
-    borrow::{Borrow, BorrowMut},
     cell::RefCell,
     collections::{HashMap, LinkedList},
     rc::Rc,
@@ -23,7 +22,7 @@ macro_rules! fold_op {
     ( $init:expr, $f:expr ) => {
         |args, _context| {
             args.into_iter()
-                .map(Expression::to_integer)
+                .map(Expression::into_integer)
                 .fold(Ok($init), |a, b| a.and_then(|a| b.map(|b| $f(a, b))))
                 .map(Expression::Integer)
         }
@@ -51,13 +50,13 @@ lazy_static! {
 
 fn op_def(args: Vec<Expression>, context: ContextRef) -> ExprResult {
     let [name, expr] = args.take()?;
-    context.set_global(name.to_name()?, expr.collapse(context.clone())?);
+    context.set_global(name.into_name()?, expr.collapse(context.clone())?);
     Ok(Expression::Nil)
 }
 
 fn op_fn(mut args: Vec<Expression>, _context: ContextRef) -> ExprResult {
     // TODO: Closures with a captured (and maybe frozen?) scope
-    if args.len() < 1 {
+    if args.is_empty() {
         return Err(LispError::ArgumentError {
             expected: ">= 1".to_string(),
             actual: args.len(),
@@ -65,9 +64,9 @@ fn op_fn(mut args: Vec<Expression>, _context: ContextRef) -> ExprResult {
     }
     let arg_names = args
         .remove(0)
-        .to_vector()?
+        .into_vector()?
         .into_iter()
-        .map(Expression::to_name)
+        .map(Expression::into_name)
         .collect::<Result<Vec<_>, _>>()?;
     let exprs = args;
 
@@ -98,7 +97,7 @@ fn op_defn(mut args: Vec<Expression>, context: ContextRef) -> ExprResult {
             actual: args.len(),
         });
     }
-    let name = args.remove(0).to_name()?;
+    let name = args.remove(0).into_name()?;
     let f = op_fn(args, context.clone())?;
     context.set_global(name, f);
     Ok(Expression::Nil)
@@ -106,19 +105,19 @@ fn op_defn(mut args: Vec<Expression>, context: ContextRef) -> ExprResult {
 
 fn op_let(mut args: Vec<Expression>, context: ContextRef) -> ExprResult {
     // TODO: Proper destructuring
-    if args.len() < 1 {
+    if args.is_empty() {
         return Err(LispError::ArgumentError {
             expected: ">= 1".to_string(),
             actual: args.len(),
         });
     }
 
-    let names = args.remove(0).to_vector()?;
+    let names = args.remove(0).into_vector()?;
     let context = context.scope();
     for (name, expr) in names
         .into_iter()
         .tuples()
-        .map(|(name, expr)| name.to_name().map(|name| (name, expr)))
+        .map(|(name, expr)| name.into_name().map(|name| (name, expr)))
         .collect::<Result<Vec<_>, _>>()?
     {
         context.set(name, expr.collapse(context.clone())?);
@@ -147,7 +146,7 @@ fn op_quote(args: Vec<Expression>, _context: ContextRef) -> ExprResult {
 
 fn op_eval(args: Vec<Expression>, context: ContextRef) -> ExprResult {
     let [expr] = args.take()?;
-    Ok(expr.collapse(context.clone())?.collapse(context)?)
+    expr.collapse(context.clone())?.collapse(context)
 }
 
 type ContextRef = Rc<Context>;
@@ -198,62 +197,62 @@ impl Context {
             names: RefCell::new(HashMap::new()),
             parent: Some(self.clone()),
             // Clone global if it's there, otherwise, this is global, so clone self
-            global: self.global.as_ref().or_else(|| Some(&self)).cloned(),
+            global: self.global.as_ref().or(Some(&self)).cloned(),
         })
     }
 }
 
 impl Expression {
-    pub fn to_nil(self) -> LispResult<()> {
+    pub fn into_nil(self) -> LispResult<()> {
         match self {
             Self::Nil => Ok(()),
             e => Err(e.type_error("nil")),
         }
     }
 
-    pub fn to_operator(self) -> LispResult<Operator> {
+    pub fn into_operator(self) -> LispResult<Operator> {
         match self {
             Self::Operator(op) => Ok(op),
             e => Err(e.type_error("operator")),
         }
     }
 
-    pub fn to_boolean(self) -> LispResult<bool> {
+    pub fn into_boolean(self) -> LispResult<bool> {
         match self {
             Self::Boolean(b) => Ok(b),
             e => Err(e.type_error("boolean")),
         }
     }
 
-    pub fn to_integer(self) -> LispResult<i32> {
+    pub fn into_integer(self) -> LispResult<i32> {
         match self {
             Self::Integer(x) => Ok(x),
             e => Err(e.type_error("integer")),
         }
     }
 
-    pub fn to_name(self) -> LispResult<String> {
+    pub fn into_name(self) -> LispResult<String> {
         match self {
             Self::Name(name) => Ok(name),
             e => Err(e.type_error("name")),
         }
     }
 
-    pub fn to_list(self) -> LispResult<LinkedList<Expression>> {
+    pub fn into_list(self) -> LispResult<LinkedList<Expression>> {
         match self {
             Self::List(l) => Ok(l),
             e => Err(e.type_error("list")),
         }
     }
 
-    pub fn to_vector(self) -> LispResult<Vec<Expression>> {
+    pub fn into_vector(self) -> LispResult<Vec<Expression>> {
         match self {
             Self::Vector(v) => Ok(v),
             e => Err(e.type_error("vector")),
         }
     }
 
-    pub fn to_function(self) -> LispResult<Rc<Function>> {
+    pub fn into_function(self) -> LispResult<Rc<Function>> {
         match self {
             Self::Function(f) => Ok(f),
             e => Err(e.type_error("function")),

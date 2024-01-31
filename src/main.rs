@@ -1,12 +1,12 @@
 use interpreter::Context;
-use parser::{expr::parse_expression, parse, Token};
+use parser::{parse, Token};
 use termwiz::{
     cell::{unicode_column_width, AttributeChange, CellAttributes},
     color::ColorAttribute,
     input::{InputEvent, KeyCode, KeyEvent, Modifiers},
     lineedit::{
         line_editor_terminal, Action, BasicHistory, CompletionCandidate, History, LineEditor,
-        LineEditorHost, NopLineEditorHost, OutputElement,
+        LineEditorHost, OutputElement,
     },
 };
 
