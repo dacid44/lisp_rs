@@ -16,6 +16,7 @@ mod error;
 mod interpreter;
 mod parser;
 mod syntax;
+mod functions;
 
 fn main() {
     let context = Context::new();

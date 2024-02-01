@@ -3,7 +3,7 @@ use std::{collections::LinkedList, fmt::Display, rc::Rc};
 use derivative::Derivative;
 use enum_map::{Enum, EnumMap};
 
-use crate::interpreter::Function;
+use crate::functions::Function;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
 pub enum Operator {
