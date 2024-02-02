@@ -95,7 +95,7 @@ pub mod tokens {
     fn integer<'a, E: ParserError<Located<&'a str>>>(
         input: &mut Located<&'a str>,
     ) -> PResult<TokenSpan, E> {
-        terminated(digit1, peek(not(one_of(is_name_char))))
+        terminated(take_while(1.., ('0'..='9', '-')), peek(not(one_of(is_name_char))))
             .parse_to()
             .map(Token::Integer)
             .with_span()
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn test_names() {
         assert_eq!(parse("asdf"), Ok(Expression::Name("asdf".to_string())));
-        assert_eq!(parse("3ab asdf"), Ok(Expression::Name("3ab".to_string())));
+        assert_eq!(parse("3ab"), Ok(Expression::Name("3ab".to_string())));
     }
 
     #[test]

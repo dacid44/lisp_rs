@@ -1,3 +1,4 @@
+use functions::init_exprs;
 use interpreter::Context;
 use parser::{parse, Token};
 use termwiz::{
@@ -17,9 +18,13 @@ mod interpreter;
 mod parser;
 mod syntax;
 mod functions;
+mod lisp_macro;
 
 fn main() {
     let context = Context::new();
+    for expr in init_exprs() {
+        expr.collapse(context.clone()).unwrap();
+    }
 
     let mut terminal = line_editor_terminal().unwrap();
     let mut editor = LineEditor::new(&mut terminal);
@@ -122,7 +127,8 @@ impl Token {
     fn style(&self) -> Option<OutputElement> {
         Some(match self {
             Self::Operator(_) => palette_color(13),
-            Self::Integer(_) | Self::Boolean(_) => palette_color(3),
+            Self::Boolean(_) => palette_color(9),
+            Self::Integer(_) => palette_color(3),
             Self::Name(_) => palette_color(12),
             _ => return None,
         })

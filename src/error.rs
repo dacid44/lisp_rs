@@ -18,8 +18,10 @@ pub enum LispError {
     },
     #[error("name error: `{0}` is not defined")]
     NameError(String),
-    #[error("argument error: function expected {expected} arguments but was given {actual}")]
+    #[error("argument error: function expected {expected} arguments but found {actual}")]
     ArgumentError { expected: String, actual: usize },
+    #[error("value error: expected {expected}, found {actual}")]
+    ValueError { expected: String, actual: Expression },
 }
 
 impl Expression {
