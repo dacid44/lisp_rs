@@ -4,13 +4,12 @@ use std::{
     rc::Rc,
 };
 
-
-
-
-
+use itertools::Either;
 
 use crate::{
-    error::{LispError, LispResult}, functions::{Function, FUNCTIONS, operators::OPERATORS}, syntax::{Expression, Operator}
+    error::{LispError, LispResult},
+    functions::{operators::OPERATORS, Function, FUNCTIONS},
+    syntax::{ExprIterator, Expression, Operator},
 };
 
 pub type ExprResult = LispResult<Expression>;
@@ -90,7 +89,7 @@ impl Expression {
         }
     }
 
-    pub fn into_integer(self) -> LispResult<i32> {
+    pub fn into_integer(self) -> LispResult<i64> {
         match self {
             Self::Integer(x) => Ok(x),
             e => Err(e.type_error("integer")),
@@ -122,6 +121,14 @@ impl Expression {
         match self {
             Self::Function(f) => Ok(f),
             e => Err(e.type_error("function")),
+        }
+    }
+
+    pub fn into_iterator(self) -> LispResult<ExprIterator> {
+        match self {
+            Self::List(l) => Ok(Either::Left(l.into_iter())),
+            Self::Vector(v) => Ok(Either::Right(v.into_iter())),
+            expr => Err(expr.type_error("list or vector")),
         }
     }
 

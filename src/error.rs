@@ -21,7 +21,10 @@ pub enum LispError {
     #[error("argument error: function expected {expected} arguments but found {actual}")]
     ArgumentError { expected: String, actual: usize },
     #[error("value error: expected {expected}, found {actual}")]
-    ValueError { expected: String, actual: Expression },
+    ValueError {
+        expected: String,
+        actual: Expression,
+    },
 }
 
 impl Expression {

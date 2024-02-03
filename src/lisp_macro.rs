@@ -1,17 +1,33 @@
-use literally::list;
-
 use crate::syntax::Expression;
 
 macro_rules! symbol {
-    ( nil ) => { Expression::Nil };
-    ( def ) => { Expression::Operator(Operator::Def) };
-    ( fn ) => { Expression::Operator(Operator::Fn) };
-    ( defn ) => { Expression::Operator(Operator::Defn) };
-    ( let ) => { Expression::Operator(Operator::Let) };
-    ( if ) => { Expression::Operator(Operator::If) };
-    ( quote ) => { Expression::Operator(Operator::Quote) };
-    ( eval ) => { Expression::Operator(Operator::Eval) };
-    ( $name:tt ) => { Expression::Name(stringify!($name).to_string()) };
+    ( nil ) => {
+        Expression::Nil
+    };
+    ( def ) => {
+        Expression::Operator(Operator::Def)
+    };
+    ( fn ) => {
+        Expression::Operator(Operator::Fn)
+    };
+    ( defn ) => {
+        Expression::Operator(Operator::Defn)
+    };
+    ( let ) => {
+        Expression::Operator(Operator::Let)
+    };
+    ( if ) => {
+        Expression::Operator(Operator::If)
+    };
+    ( quote ) => {
+        Expression::Operator(Operator::Quote)
+    };
+    ( eval ) => {
+        Expression::Operator(Operator::Eval)
+    };
+    ( $name:tt ) => {
+        Expression::Name(stringify!($name).to_string())
+    };
 }
 
 macro_rules! expression {
@@ -23,17 +39,21 @@ macro_rules! expression {
 }
 
 macro_rules! lisp {
-    ( $tt:tt ) => { {
-        use $crate::{syntax::{Operator, Expression}, lisp_macro::{expression, symbol, IntoExpr}};
+    ( $tt:tt ) => {{
+        use literally::list;
+        use $crate::{
+            lisp_macro::{expression, symbol, IntoExpr},
+            syntax::{Expression, Operator},
+        };
         expression!($tt)
-    } };
+    }};
 }
 
-pub(crate) use {lisp, expression, symbol};
+pub(crate) use {expression, lisp, symbol};
 
 #[test]
 fn test() {
-    let s = lisp!{ (defn factorial [n] (if (<= n 1) 1 (* n (- n 1)))) };
+    let s = lisp! { (defn factorial [n] (if (<= n 1) 1 (* n (- n 1)))) };
     panic!("{:?}", s);
 }
 
@@ -41,7 +61,7 @@ pub trait IntoExpr {
     fn into_expr(self) -> Expression;
 }
 
-impl IntoExpr for i32 {
+impl IntoExpr for i64 {
     fn into_expr(self) -> Expression {
         Expression::Integer(self)
     }

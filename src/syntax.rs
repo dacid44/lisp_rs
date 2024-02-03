@@ -2,6 +2,7 @@ use std::{collections::LinkedList, fmt::Display, rc::Rc};
 
 use derivative::Derivative;
 use enum_map::{Enum, EnumMap};
+use itertools::Either;
 
 use crate::functions::Function;
 
@@ -27,7 +28,7 @@ pub enum Expression {
     Nil,
     Operator(Operator),
     Boolean(bool),
-    Integer(i32),
+    Integer(i64),
     Name(String),
     List(LinkedList<Expression>),
     Vector(Vec<Expression>),
@@ -61,5 +62,20 @@ impl Display for Expression {
             ),
             Self::Function(func) => write!(f, "<fn at {:p}>", func.as_ref()),
         }
+    }
+}
+
+pub type ExprIterator =
+    Either<std::collections::linked_list::IntoIter<Expression>, std::vec::IntoIter<Expression>>;
+
+impl From<LinkedList<Expression>> for Expression {
+    fn from(value: LinkedList<Expression>) -> Self {
+        Expression::List(value)
+    }
+}
+
+impl From<Vec<Expression>> for Expression {
+    fn from(value: Vec<Expression>) -> Self {
+        Expression::Vector(value)
     }
 }

@@ -16,7 +16,7 @@ pub enum Token {
     Quote,
     Operator(Operator),
     Boolean(bool),
-    Integer(i32),
+    Integer(i64),
     Name(String),
 }
 
@@ -28,7 +28,6 @@ impl ContainsToken<Self> for Token {
 
 pub mod tokens {
     use winnow::{
-        ascii::digit1,
         combinator::{alt, not, peek, repeat, terminated},
         error::{ContextError, ParseError, ParserError},
         token::{one_of, take_while},
@@ -95,11 +94,14 @@ pub mod tokens {
     fn integer<'a, E: ParserError<Located<&'a str>>>(
         input: &mut Located<&'a str>,
     ) -> PResult<TokenSpan, E> {
-        terminated(take_while(1.., ('0'..='9', '-')), peek(not(one_of(is_name_char))))
-            .parse_to()
-            .map(Token::Integer)
-            .with_span()
-            .parse_next(input)
+        terminated(
+            take_while(1.., ('0'..='9', '-')),
+            peek(not(one_of(is_name_char))),
+        )
+        .parse_to()
+        .map(Token::Integer)
+        .with_span()
+        .parse_next(input)
     }
 
     fn name<'a, E: ParserError<Located<&'a str>>>(

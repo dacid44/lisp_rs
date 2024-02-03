@@ -14,11 +14,11 @@ use termwiz::{
 use crate::parser::tokens::tokenize;
 
 mod error;
+mod functions;
 mod interpreter;
+mod lisp_macro;
 mod parser;
 mod syntax;
-mod functions;
-mod lisp_macro;
 
 fn main() {
     let context = Context::new();
