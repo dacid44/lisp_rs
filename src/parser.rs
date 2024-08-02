@@ -41,7 +41,7 @@ pub mod tokens {
 
     use super::Token;
 
-    type TokenSpan = (Token, Range<usize>);
+    pub type TokenSpan = (Token, Range<usize>);
 
     fn is_name_char(c: char) -> bool {
         c.is_ascii_alphanumeric() || "*+!-_'?<>=/".contains(c)

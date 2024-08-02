@@ -7,11 +7,13 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.79"
+colored = "2.1.0"
 derivative = "2.2.0"
 enum-map = "2.7.3"
 itertools = "0.12.1"
 lazy_static = "1.4.0"
 literally = "0.1.3"
+rustyline = { version = "14.0.0", features = ["derive"] }
 termwiz = "0.22.0"
 thiserror = "1.0.56"
 winnow = "0.5.35"
