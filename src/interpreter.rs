@@ -164,6 +164,13 @@ impl Expression {
                     e => Err(e.type_error("operator or function")),
                 }
             }
+            Self::Vector(mut vector) => {
+                for expr in &mut vector {
+                    let expr_value = std::mem::replace(expr, Expression::Nil);
+                    *expr = expr_value.collapse(context.clone())?;
+                }
+                Ok(Self::Vector(vector))
+            }
             e => Ok(e),
         }
     }

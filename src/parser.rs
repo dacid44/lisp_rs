@@ -189,25 +189,17 @@ pub mod expr {
         end: Token,
     ) -> impl Parser<&'a [Token], Vec<Expression>, ContextError> {
         delimited(one_of(start), repeat(0.., expression), one_of(end))
-        // repeat(0.., expression)
     }
 
     fn expression<'a>(input: &mut &'a [Token]) -> PResult<Expression, ContextError> {
         alt((
             single_token_expr,
+            preceded(one_of(Token::Quote), expression)
+                .map(|expr| Expression::List(list![Expression::Operator(Operator::Quote), expr]))
+                .context(StrContext::Label("quote")),
             list(Token::LeftParen, Token::RightParen)
                 .map(|v| Expression::List(v.into_iter().collect()))
                 .context(StrContext::Label("list")),
-            preceded(
-                one_of(Token::Quote),
-                list(Token::LeftParen, Token::RightParen),
-            )
-            .map(|v| {
-                Expression::List(list![
-                    Expression::Operator(Operator::Quote),
-                    Expression::List(v.into_iter().collect())
-                ])
-            }),
             list(Token::LeftBracket, Token::RightBracket)
                 .map(Expression::Vector)
                 .context(StrContext::Label("vector")),
