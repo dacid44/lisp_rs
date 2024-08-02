@@ -36,6 +36,7 @@ impl Expression {
                 Expression::Operator(_) => "operator",
                 Expression::Boolean(_) => "boolean",
                 Expression::Integer(_) => "integer",
+                Expression::String(_) => "string",
                 Expression::Name(_) => "name",
                 Expression::List(_) => "list",
                 Expression::Vector(_) => "vector",

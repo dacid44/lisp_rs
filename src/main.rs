@@ -129,6 +129,7 @@ impl Token {
             Self::Operator(_) => palette_color(13),
             Self::Boolean(_) => palette_color(9),
             Self::Integer(_) => palette_color(3),
+            Self::String(_) => palette_color(2),
             Self::Name(_) => palette_color(12),
             _ => return None,
         })

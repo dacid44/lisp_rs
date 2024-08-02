@@ -72,3 +72,9 @@ impl IntoExpr for bool {
         Expression::Boolean(self)
     }
 }
+
+impl IntoExpr for &str {
+    fn into_expr(self) -> Expression {
+        Expression::String(self.to_owned())
+    }
+}

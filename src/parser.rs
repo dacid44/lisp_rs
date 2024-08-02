@@ -17,6 +17,7 @@ pub enum Token {
     Operator(Operator),
     Boolean(bool),
     Integer(i64),
+    String(String),
     Name(String),
 }
 
@@ -28,9 +29,10 @@ impl ContainsToken<Self> for Token {
 
 pub mod tokens {
     use winnow::{
-        combinator::{alt, not, peek, repeat, terminated},
+        ascii::escaped_transform,
+        combinator::{alt, delimited, not, peek, repeat, terminated},
         error::{ContextError, ParseError, ParserError},
-        token::{one_of, take_while},
+        token::{one_of, take_till, take_while},
         Located, PResult, Parser,
     };
 
@@ -104,6 +106,24 @@ pub mod tokens {
         .parse_next(input)
     }
 
+    fn string<'a, E: ParserError<Located<&'a str>>>(
+        input: &mut Located<&'a str>,
+    ) -> PResult<TokenSpan, E> {
+        delimited(
+            '"',
+            escaped_transform::<_, _, _, _, String>(
+                take_till(1.., ['"', '\\']),
+                '\\',
+                alt(("\\".value("\\"), "\"".value("\""), "n".value("\n"))),
+            ),
+            '"',
+        )
+        .output_into()
+        .map(Token::String)
+        .with_span()
+        .parse_next(input)
+    }
+
     fn name<'a, E: ParserError<Located<&'a str>>>(
         input: &mut Located<&'a str>,
     ) -> PResult<TokenSpan, E> {
@@ -116,7 +136,7 @@ pub mod tokens {
     fn token<'a, E: ParserError<Located<&'a str>>>(
         input: &mut Located<&'a str>,
     ) -> PResult<TokenSpan, E> {
-        alt([punctuation, operator, boolean, integer, name]).parse_next(input)
+        alt([punctuation, operator, boolean, integer, string, name]).parse_next(input)
     }
 
     fn tokens<'a, E: ParserError<Located<&'a str>>>(
@@ -156,6 +176,7 @@ pub mod expr {
             Token::Operator(op) => Some(Expression::Operator(op)),
             Token::Boolean(b) => Some(Expression::Boolean(b)),
             Token::Integer(x) => Some(Expression::Integer(x)),
+            Token::String(s) => Some(Expression::String(s)),
             Token::Name(s) => Some(Expression::Name(s)),
             _ => None,
         })

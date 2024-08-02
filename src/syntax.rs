@@ -29,6 +29,7 @@ pub enum Expression {
     Operator(Operator),
     Boolean(bool),
     Integer(i64),
+    String(String),
     Name(String),
     List(LinkedList<Expression>),
     Vector(Vec<Expression>),
@@ -42,6 +43,7 @@ impl Display for Expression {
             Self::Operator(op) => write!(f, "<operator {}>", Operator::TEXT[*op]),
             Self::Boolean(b) => write!(f, "{b}"),
             Self::Integer(x) => write!(f, "{x}"),
+            Self::String(s) => write!(f, "\"{}\"", s.replace("\\", "\\\\").replace("\n", "\\n")),
             Self::Name(name) => write!(f, "<{name}>"),
             Self::List(list) => write!(
                 f,
