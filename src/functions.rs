@@ -8,13 +8,18 @@ use literally::{hmap, list};
 
 use crate::{
     error::{Args, LispError, LispResult},
-    interpreter::{ContextRef, ExprResult},
+    interpreter::{Context, ContextRef, ExprResult},
     lisp_macro::lisp,
     syntax::{ExprIterator, Expression},
 };
 
-pub type Function = dyn Fn(Vec<Expression>, ContextRef) -> ExprResult;
-pub type BaseFunction = fn(Vec<Expression>, ContextRef) -> ExprResult;
+/// Functions defined by Lisp code. Context comes only from the args and the captured scope.
+pub type Function = dyn Fn(Vec<Expression>) -> ExprResult;
+/// Functions defined in Rust code. If they need a context, they will create an empty one from the
+/// global context.
+pub type BaseFunction = fn(Vec<Expression>) -> ExprResult;
+/// Operators such as fn and let which can access the parent scope.
+pub type OpFunction = fn(Vec<Expression>, ContextRef) -> ExprResult;
 
 macro_rules! match_args {
     ( $args:expr; $err_msg:literal; $pat:ident $(if $pred:expr)? => $expr:expr $(,)? ) => {
@@ -84,17 +89,17 @@ pub mod operators {
         syntax::{Expression, Operator},
     };
 
-    use super::BaseFunction;
+    use super::OpFunction;
 
     lazy_static! {
-        pub static ref OPERATORS: EnumMap<Operator, BaseFunction> = enum_map! {
-            Operator::Def => op_def as BaseFunction,
-            Operator::Fn => op_fn as BaseFunction,
-            Operator::Defn => op_defn as BaseFunction,
-            Operator::Let => op_let as BaseFunction,
-            Operator::Quote => op_quote as BaseFunction,
-            Operator::Eval => op_eval as BaseFunction,
-            Operator::If => op_if as BaseFunction,
+        pub static ref OPERATORS: EnumMap<Operator, OpFunction> = enum_map! {
+            Operator::Def => op_def as OpFunction,
+            Operator::Fn => op_fn as OpFunction,
+            Operator::Defn => op_defn as OpFunction,
+            Operator::Let => op_let as OpFunction,
+            Operator::Quote => op_quote as OpFunction,
+            Operator::Eval => op_eval as OpFunction,
+            Operator::If => op_if as OpFunction,
         };
     }
 
@@ -104,8 +109,7 @@ pub mod operators {
         Ok(Expression::Nil)
     }
 
-    fn op_fn(mut args: Vec<Expression>, _context: ContextRef) -> ExprResult {
-        // TODO: Closures with a captured (and maybe frozen?) scope
+    fn op_fn(mut args: Vec<Expression>, context: ContextRef) -> ExprResult {
         if args.is_empty() {
             return Err(LispError::ArgumentError {
                 expected: ">= 1".to_string(),
@@ -120,8 +124,8 @@ pub mod operators {
             .collect::<Result<Vec<_>, _>>()?;
         let exprs = args;
 
-        Ok(Expression::Function(Rc::new(move |args, context| {
-            let context = context.scope();
+        Ok(Expression::Function(Rc::new(move |args| {
+            let context = context.clone().scope();
             if arg_names.len() != args.len() {
                 return Err(LispError::ArgumentError {
                     expected: format!("{}", arg_names.len()),
@@ -202,7 +206,7 @@ pub mod operators {
 
 macro_rules! fold_op {
     ( $init:expr, $f:expr ) => {
-        |args, _context| {
+        |args| {
             match_args! {args; ">= 1";
                 [x] => Ok(Expression::Integer($f($init, x.into_integer()?))),
                 args if args.len() >= 2 => {
@@ -220,7 +224,7 @@ macro_rules! fold_op {
 
 macro_rules! compare_op {
     ( $convert:expr, $f:expr ) => {
-        |args, _context| -> ExprResult {
+        |args| -> ExprResult {
             match_args! {args; ">= 1";
                 [_] => Ok(Expression::Boolean(true)),
                 args if args.len() >= 2 => {
@@ -246,7 +250,7 @@ lazy_static! {
         "*" => fold_op!(1, i64::wrapping_mul) as BaseFunction,
         "-" => fold_op!(0, i64::wrapping_sub) as BaseFunction,
         "/" => fold_op!(1, i64::wrapping_div) as BaseFunction,
-        "not" => (|args, _| Ok(Expression::Boolean(!args.take::<1>()?[0].truthy()))) as BaseFunction,
+        "not" => (|args| Ok(Expression::Boolean(!args.take::<1>()?[0].truthy()))) as BaseFunction,
         "=" => compare_op!(Ok, PartialEq::eq) as BaseFunction,
         "<" => compare_op!(Expression::into_integer, PartialOrd::lt) as BaseFunction,
         ">" => compare_op!(Expression::into_integer, PartialOrd::gt) as BaseFunction,
@@ -260,7 +264,7 @@ lazy_static! {
     };
 }
 
-fn fn_range(args: Vec<Expression>, _context: ContextRef) -> ExprResult {
+fn fn_range(args: Vec<Expression>) -> ExprResult {
     let (start, end, step) = match_args! {args; "1-3";
         [end] => (0, end.into_integer()?, 1),
         [start, end] => (start.into_integer()?, end.into_integer()?, 1),
@@ -288,7 +292,9 @@ fn fn_range(args: Vec<Expression>, _context: ContextRef) -> ExprResult {
     }))
 }
 
-fn fn_apply(mut args: Vec<Expression>, context: ContextRef) -> ExprResult {
+fn fn_apply(mut args: Vec<Expression>) -> ExprResult {
+    let context = Context::new();
+
     if args.len() <= 1 {
         return Err(LispError::ArgumentError {
             expected: ">= 2".to_string(),
@@ -316,10 +322,7 @@ impl Iterator for FnMapZip {
     }
 }
 
-fn fn_map<C: FromIterator<Expression> + Into<Expression>>(
-    mut args: Vec<Expression>,
-    context: ContextRef,
-) -> ExprResult {
+fn fn_map<C: FromIterator<Expression> + Into<Expression>>(mut args: Vec<Expression>) -> ExprResult {
     if args.len() <= 1 {
         return Err(LispError::ArgumentError {
             expected: ">= 2".to_string(),
@@ -333,13 +336,17 @@ fn fn_map<C: FromIterator<Expression> + Into<Expression>>(
         .map(Expression::into_iterator)
         .collect::<Result<Vec<_>, _>>()?;
 
+    let context = Context::new();
+
     FnMapZip(f, colls)
         .map(|exprs| exprs.collapse(context.clone()))
         .collect::<LispResult<C>>()
         .map(|c| c.into())
 }
 
-fn fn_reduce(args: Vec<Expression>, context: ContextRef) -> ExprResult {
+fn fn_reduce(args: Vec<Expression>) -> ExprResult {
+    let context = Context::new();
+
     let (f, val, mut iter) = match_args! {args; "2-3";
         [f, coll] => {
             let mut iter = coll.into_iterator()?;

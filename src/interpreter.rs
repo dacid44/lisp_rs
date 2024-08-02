@@ -22,13 +22,22 @@ pub struct Context {
     global: Option<ContextRef>,
 }
 
+// TODO: This will need to be changed if I ever implement threading
+thread_local! {
+    pub static GLOBAL_CONTEXT: ContextRef = Context::new_global();
+}
+
 impl Context {
-    pub fn new() -> ContextRef {
+    pub fn new_global() -> ContextRef {
         Rc::new(Self {
             names: RefCell::new(HashMap::new()),
             parent: None,
             global: None,
         })
+    }
+
+    pub fn new() -> ContextRef {
+        GLOBAL_CONTEXT.with(|global| global.clone().scope())
     }
 
     pub fn get(&self, name: &str) -> ExprResult {
@@ -45,6 +54,8 @@ impl Context {
             .ok_or(LispError::NameError(name.to_string()))
     }
 
+    /// Context::set should only be used by the interpreter or operators to initialize a context.
+    /// Generally, Context is immutable.
     pub fn set(&self, name: String, value: Expression) {
         self.names.borrow_mut().insert(name, value);
     }
@@ -149,7 +160,6 @@ impl Expression {
                         list.into_iter()
                             .map(|expr| expr.collapse(context.clone()))
                             .collect::<Result<_, _>>()?,
-                        context,
                     ),
                     e => Err(e.type_error("operator or function")),
                 }
