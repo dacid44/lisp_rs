@@ -142,7 +142,7 @@ pub mod expr {
     use literally::list;
     use winnow::{
         combinator::{alt, delimited, preceded, repeat},
-        error::{ContextError, ParseError, ParserError},
+        error::{ContextError, ParseError, StrContext},
         token::{any, one_of},
         PResult, Parser,
     };
@@ -151,9 +151,7 @@ pub mod expr {
 
     use super::Token;
 
-    fn single_token_expr<'a, E: ParserError<&'a [Token]>>(
-        input: &mut &'a [Token],
-    ) -> PResult<Expression, E> {
+    fn single_token_expr<'a>(input: &mut &'a [Token]) -> PResult<Expression, ContextError> {
         any.verify_map(|t| match t {
             Token::Operator(op) => Some(Expression::Operator(op)),
             Token::Boolean(b) => Some(Expression::Boolean(b)),
@@ -161,24 +159,24 @@ pub mod expr {
             Token::Name(s) => Some(Expression::Name(s)),
             _ => None,
         })
+        .context(StrContext::Label("single token expression"))
         .parse_next(input)
     }
 
-    fn list<'a, E: ParserError<&'a [Token]>>(
+    fn list<'a>(
         start: Token,
         end: Token,
-    ) -> impl Parser<&'a [Token], Vec<Expression>, E> {
+    ) -> impl Parser<&'a [Token], Vec<Expression>, ContextError> {
         delimited(one_of(start), repeat(0.., expression), one_of(end))
         // repeat(0.., expression)
     }
 
-    fn expression<'a, E: ParserError<&'a [Token]>>(
-        input: &mut &'a [Token],
-    ) -> PResult<Expression, E> {
+    fn expression<'a>(input: &mut &'a [Token]) -> PResult<Expression, ContextError> {
         alt((
             single_token_expr,
             list(Token::LeftParen, Token::RightParen)
-                .map(|v| Expression::List(v.into_iter().collect())),
+                .map(|v| Expression::List(v.into_iter().collect()))
+                .context(StrContext::Label("list")),
             preceded(
                 one_of(Token::Quote),
                 list(Token::LeftParen, Token::RightParen),
@@ -189,7 +187,9 @@ pub mod expr {
                     Expression::List(v.into_iter().collect())
                 ])
             }),
-            list(Token::LeftBracket, Token::RightBracket).map(Expression::Vector),
+            list(Token::LeftBracket, Token::RightBracket)
+                .map(Expression::Vector)
+                .context(StrContext::Label("vector")),
         ))
         .parse_next(input)
     }
