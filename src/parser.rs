@@ -161,7 +161,7 @@ pub mod tokens {
 pub mod expr {
     use literally::list;
     use winnow::{
-        combinator::{alt, delimited, preceded, repeat},
+        combinator::{alt, cut_err, delimited, preceded, repeat},
         error::{ContextError, ParseError, StrContext},
         token::{any, one_of},
         PResult, Parser,
@@ -188,13 +188,13 @@ pub mod expr {
         start: Token,
         end: Token,
     ) -> impl Parser<&'a [Token], Vec<Expression>, ContextError> {
-        delimited(one_of(start), repeat(0.., expression), one_of(end))
+        delimited(one_of(start), cut_err(repeat(0.., expression)), cut_err(one_of(end)))
     }
 
     fn expression<'a>(input: &mut &'a [Token]) -> PResult<Expression, ContextError> {
         alt((
             single_token_expr,
-            preceded(one_of(Token::Quote), expression)
+             preceded(one_of(Token::Quote), cut_err(expression))
                 .map(|expr| Expression::List(list![Expression::Operator(Operator::Quote), expr]))
                 .context(StrContext::Label("quote")),
             list(Token::LeftParen, Token::RightParen)
