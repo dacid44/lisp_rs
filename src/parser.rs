@@ -30,9 +30,9 @@ impl ContainsToken<Self> for Token {
 pub mod tokens {
     use winnow::{
         ascii::escaped_transform,
-        combinator::{alt, delimited, not, peek, repeat, terminated},
-        error::{ContextError, ParseError, ParserError},
-        token::{one_of, take_till, take_while},
+        combinator::{alt, delimited, not, peek, repeat, repeat_till, rest, terminated},
+        error::{ContextError, ParseError},
+        token::{one_of, take, take_till, take_while},
         Located, PResult, Parser,
     };
 
@@ -43,6 +43,9 @@ pub mod tokens {
 
     pub type TokenSpan = (Token, Range<usize>);
 
+    type InputStream<'a> = Located<&'a str>;
+    type TokenError = ContextError;
+
     fn is_name_char(c: char) -> bool {
         c.is_ascii_alphanumeric() || "*+!-_'?<>=/".contains(c)
     }
@@ -51,9 +54,7 @@ pub mod tokens {
         c.is_ascii_whitespace() || c == ','
     }
 
-    fn punctuation<'a, E: ParserError<Located<&'a str>>>(
-        input: &mut Located<&'a str>,
-    ) -> PResult<(Token, Range<usize>), E> {
+    fn punctuation(input: &mut InputStream<'_>) -> PResult<(Token, Range<usize>), TokenError> {
         use Token as T;
         alt([
             '('.value(T::LeftParen),
@@ -66,36 +67,33 @@ pub mod tokens {
         .parse_next(input)
     }
 
-    fn operator<'a, E: ParserError<Located<&'a str>>>(
-        input: &mut Located<&'a str>,
-    ) -> PResult<TokenSpan, E> {
+    fn operator(input: &mut InputStream<'_>) -> PResult<TokenSpan, TokenError> {
         use Operator as O;
-        alt([
-            "defn".value(O::Defn),
-            "def".value(O::Def),
-            "fn".value(O::Fn),
-            "let".value(O::Let),
-            "if".value(O::If),
-            "quote".value(O::Quote),
-            "eval".value(O::Eval),
-        ])
+        terminated(
+            alt([
+                "defn".value(O::Defn),
+                "def".value(O::Def),
+                "fn".value(O::Fn),
+                "let".value(O::Let),
+                "if".value(O::If),
+                "quote".value(O::Quote),
+                "eval".value(O::Eval),
+            ]),
+            peek(not(one_of(is_name_char))),
+        )
         .map(Token::Operator)
         .with_span()
         .parse_next(input)
     }
 
-    fn boolean<'a, E: ParserError<Located<&'a str>>>(
-        input: &mut Located<&'a str>,
-    ) -> PResult<TokenSpan, E> {
+    fn boolean(input: &mut InputStream<'_>) -> PResult<TokenSpan, TokenError> {
         alt(["true".value(true), "false".value(false)])
             .map(Token::Boolean)
             .with_span()
             .parse_next(input)
     }
 
-    fn integer<'a, E: ParserError<Located<&'a str>>>(
-        input: &mut Located<&'a str>,
-    ) -> PResult<TokenSpan, E> {
+    fn integer(input: &mut InputStream<'_>) -> PResult<TokenSpan, TokenError> {
         terminated(
             take_while(1.., ('0'..='9', '-')),
             peek(not(one_of(is_name_char))),
@@ -106,9 +104,7 @@ pub mod tokens {
         .parse_next(input)
     }
 
-    fn string<'a, E: ParserError<Located<&'a str>>>(
-        input: &mut Located<&'a str>,
-    ) -> PResult<TokenSpan, E> {
+    fn string(input: &mut InputStream<'_>) -> PResult<TokenSpan, TokenError> {
         delimited(
             '"',
             escaped_transform::<_, _, _, _, String>(
@@ -124,24 +120,18 @@ pub mod tokens {
         .parse_next(input)
     }
 
-    fn name<'a, E: ParserError<Located<&'a str>>>(
-        input: &mut Located<&'a str>,
-    ) -> PResult<TokenSpan, E> {
+    fn name(input: &mut InputStream<'_>) -> PResult<TokenSpan, TokenError> {
         take_while(1.., is_name_char)
             .map(|s: &str| Token::Name(s.to_string()))
             .with_span()
             .parse_next(input)
     }
 
-    fn token<'a, E: ParserError<Located<&'a str>>>(
-        input: &mut Located<&'a str>,
-    ) -> PResult<TokenSpan, E> {
+    fn token(input: &mut InputStream<'_>) -> PResult<TokenSpan, TokenError> {
         alt([punctuation, operator, boolean, integer, string, name]).parse_next(input)
     }
 
-    fn tokens<'a, E: ParserError<Located<&'a str>>>(
-        input: &mut Located<&'a str>,
-    ) -> PResult<Vec<TokenSpan>, E> {
+    fn tokens(input: &mut InputStream<'_>) -> PResult<Vec<TokenSpan>, TokenError> {
         repeat(
             0..,
             alt((token.map(Some), take_while(1.., is_whitespace).value(None))),
@@ -150,11 +140,36 @@ pub mod tokens {
         .parse_next(input)
     }
 
+    fn noisy_token(input: &mut InputStream<'_>) -> PResult<TokenSpan, TokenError> {
+        repeat_till(0.., take(1usize), token)
+            .map(|((), t)| t)
+            .parse_next(input)
+    }
+
+    fn noisy_tokens(input: &mut InputStream<'_>) -> PResult<Vec<TokenSpan>, TokenError> {
+        (
+            take_while(0.., is_whitespace).void(),
+            repeat(
+                0..,
+                (noisy_token, take_while(0.., is_whitespace).void()).map(|(t, _)| t),
+            ),
+            rest,
+        )
+            .map(|(_, v, _): (_, Vec<_>, _)| v)
+            .parse_next(input)
+    }
+
     pub fn tokenize(
         input: &str,
-    ) -> Result<Vec<TokenSpan>, ParseError<Located<&str>, ContextError>> {
+    ) -> Result<Vec<TokenSpan>, ParseError<InputStream<'_>, ContextError>> {
         // TODO: Replace this error type with a LispError
         tokens.parse(Located::new(input))
+    }
+
+    pub fn tokenize_noisy(
+        input: &str,
+    ) -> Result<Vec<TokenSpan>, ParseError<InputStream<'_>, ContextError>> {
+        noisy_tokens.parse(Located::new(input))
     }
 }
 
@@ -188,13 +203,17 @@ pub mod expr {
         start: Token,
         end: Token,
     ) -> impl Parser<&'a [Token], Vec<Expression>, ContextError> {
-        delimited(one_of(start), cut_err(repeat(0.., expression)), cut_err(one_of(end)))
+        delimited(
+            one_of(start),
+            cut_err(repeat(0.., expression)),
+            cut_err(one_of(end)),
+        )
     }
 
     fn expression<'a>(input: &mut &'a [Token]) -> PResult<Expression, ContextError> {
         alt((
             single_token_expr,
-             preceded(one_of(Token::Quote), cut_err(expression))
+            preceded(one_of(Token::Quote), cut_err(expression))
                 .map(|expr| Expression::List(list![Expression::Operator(Operator::Quote), expr]))
                 .context(StrContext::Label("quote")),
             list(Token::LeftParen, Token::RightParen)

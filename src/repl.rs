@@ -2,12 +2,13 @@ use std::borrow::Cow;
 
 use colored::{Color, ColoredString, Colorize, Style};
 use rustyline::{
-    highlight::Highlighter, history::DefaultHistory, validate::Validator, Completer, Editor,
+    highlight::Highlighter, history::DefaultHistory, validate::{ValidationContext, ValidationResult, Validator}, Completer, Editor,
     Helper, Hinter,
 };
+use winnow::error::ParseError;
 
 use crate::parser::{
-    tokens::{tokenize, TokenSpan},
+    tokens::{tokenize, tokenize_noisy, TokenSpan},
     Token,
 };
 
@@ -18,7 +19,7 @@ pub struct LispHelper;
 
 impl Highlighter for LispHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        match tokenize(line) {
+        match tokenize_noisy(line) {
             Ok(tokens) => Cow::Owned(highlight_tokens(&tokens, line)),
             Err(_) => Cow::Borrowed(line),
         }
@@ -51,7 +52,20 @@ impl Highlighter for LispHelper {
     }
 }
 
-impl Validator for LispHelper {}
+impl Validator for LispHelper {
+    // fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
+    //     match tokenize(ctx.input()) {
+    //         Ok(_) => Ok(ValidationResult::Valid(None)),
+    //         Err(error) => match error.inner() {
+
+    //         },
+    //     }
+    // }
+
+    fn validate_while_typing(&self) -> bool {
+        false
+    }
+}
 
 fn highlight_tokens(tokens: &[TokenSpan], s: &str) -> String {
     let mut next_start = 0;
