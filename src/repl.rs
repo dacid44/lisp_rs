@@ -8,8 +8,7 @@ use rustyline::{
 use winnow::error::ParseError;
 
 use crate::parser::{
-    tokens::{tokenize, tokenize_noisy, TokenSpan},
-    Token,
+    check_complete, tokens::{tokenize, tokenize_noisy, TokenSpan}, PartialExpressionResult, Token
 };
 
 pub type Repl = Editor<LispHelper, DefaultHistory>;
@@ -53,14 +52,13 @@ impl Highlighter for LispHelper {
 }
 
 impl Validator for LispHelper {
-    // fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
-    //     match tokenize(ctx.input()) {
-    //         Ok(_) => Ok(ValidationResult::Valid(None)),
-    //         Err(error) => match error.inner() {
-
-    //         },
-    //     }
-    // }
+    fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
+        Ok(match check_complete(ctx.input()) {
+            PartialExpressionResult::Ok => ValidationResult::Valid(None),
+            PartialExpressionResult::Incomplete(_) => ValidationResult::Incomplete,
+            PartialExpressionResult::Err(err) => ValidationResult::Invalid(Some(err.to_string())),
+        })
+    }
 
     fn validate_while_typing(&self) -> bool {
         false

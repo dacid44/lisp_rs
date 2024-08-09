@@ -1,4 +1,8 @@
-use winnow::stream::ContainsToken;
+use winnow::{
+    error::{ErrMode, Needed},
+    stream::ContainsToken,
+    Parser, Partial,
+};
 
 use crate::{
     error::{LispError, LispResult},
@@ -178,15 +182,21 @@ pub mod expr {
     use winnow::{
         combinator::{alt, cut_err, delimited, preceded, repeat},
         error::{ContextError, ParseError, StrContext},
+        stream::{Stream, StreamIsPartial},
         token::{any, one_of},
-        PResult, Parser,
+        PResult, Parser, Partial,
     };
 
     use crate::syntax::{Expression, Operator};
 
     use super::Token;
 
-    fn single_token_expr<'a>(input: &mut &'a [Token]) -> PResult<Expression, ContextError> {
+    trait InputStream: Stream<Token = Token> + StreamIsPartial {}
+
+    impl InputStream for &[Token] {}
+    impl InputStream for Partial<&[Token]> {}
+
+    fn single_token_expr<'a>(input: &mut impl InputStream) -> PResult<Expression, ContextError> {
         any.verify_map(|t| match t {
             Token::Operator(op) => Some(Expression::Operator(op)),
             Token::Boolean(b) => Some(Expression::Boolean(b)),
@@ -199,10 +209,10 @@ pub mod expr {
         .parse_next(input)
     }
 
-    fn list<'a>(
+    fn list<'a, I: InputStream>(
         start: Token,
         end: Token,
-    ) -> impl Parser<&'a [Token], Vec<Expression>, ContextError> {
+    ) -> impl Parser<I, Vec<Expression>, ContextError> {
         delimited(
             one_of(start),
             cut_err(repeat(0.., expression)),
@@ -210,7 +220,7 @@ pub mod expr {
         )
     }
 
-    fn expression<'a>(input: &mut &'a [Token]) -> PResult<Expression, ContextError> {
+    pub fn expression<'a>(input: &mut impl InputStream) -> PResult<Expression, ContextError> {
         alt((
             single_token_expr,
             preceded(one_of(Token::Quote), cut_err(expression))
@@ -241,7 +251,40 @@ pub fn parse(input: &str) -> LispResult<Expression> {
             .map(|(t, _)| t)
             .collect::<Vec<_>>()[..],
     )
+    // TODO: generate a better error message
     .map_err(|err| LispError::SyntaxError(format!("{err:?}")))
+}
+
+pub enum PartialExpressionResult {
+    Ok,
+    Incomplete(Needed),
+    Err(LispError),
+}
+
+pub fn check_complete(input: &str) -> PartialExpressionResult {
+    let tokens = match tokenize(input) {
+        Ok(tokens) => tokens,
+        Err(err) => return PartialExpressionResult::Err(LispError::TokenError(err.to_string())),
+    }
+    .into_iter()
+    .map(|(t, _)| t)
+    .collect::<Vec<_>>();
+
+    let stream = &mut Partial::new(tokens.as_slice());
+
+    loop {
+        match expr::expression.parse_next(stream) {
+            Ok(_) => {}
+            Err(ErrMode::Incomplete(needed)) => return PartialExpressionResult::Incomplete(needed),
+            Err(err) => {
+                return PartialExpressionResult::Err(LispError::SyntaxError(err.to_string()))
+            }
+        }
+
+        if stream.is_empty() {
+            return PartialExpressionResult::Ok;
+        }
+    }
 }
 
 #[cfg(test)]
