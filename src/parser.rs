@@ -255,6 +255,29 @@ pub fn parse(input: &str) -> LispResult<Expression> {
     .map_err(|err| LispError::SyntaxError(format!("{err:?}")))
 }
 
+pub fn parse_multiple(input: &str) -> LispResult<Vec<Expression>> {
+    let tokens = tokenize(input)
+        .map_err(|err| LispError::TokenError(err.to_string()))?
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect::<Vec<_>>();
+
+    let stream = &mut tokens.as_slice();
+    let mut expressions = Vec::new();
+
+    loop {
+        expressions.push(
+            expr::expression
+                .parse_next(stream)
+                .map_err(|err| LispError::TokenError(err.to_string()))?,
+        );
+
+        if stream.is_empty() {
+            return Ok(expressions)
+        }
+    }
+}
+
 pub enum PartialExpressionResult {
     Ok,
     Incomplete(Needed),
